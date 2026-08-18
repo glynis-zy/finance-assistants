@@ -6,6 +6,7 @@
 # Celery task 的 .delay 为动态属性，第三方边界豁免
 # pyright: reportFunctionMemberAccess=false
 
+import contextlib
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -33,6 +34,7 @@ from app.models.reimbursement import (
     ReimbursementItem,
 )
 from app.schemas.reimbursement import ReimbursementCreate
+from app.services import file_store_service
 from app.services.audit_flow_service import get_conclusion, write_ledger
 from app.tasks.audit import run_audit_task
 
@@ -165,9 +167,11 @@ def upload_attachments(
             raise ValidationError(f"非法附件分类: {cat}")
         content = f.file.read()
         size = len(content)
+        # 真实写盘（随机安全文件名，防路径穿越）；原始文件名仅作元数据
+        storage_path = file_store_service.save_upload(content, f.filename)
         fs = FileStore(
             file_name=f.filename or "",
-            storage_path=f"uploads/{uuid4().hex}",
+            storage_path=storage_path,
             mime_type=f.content_type,
             size=size,
         )
@@ -183,7 +187,7 @@ def upload_attachments(
                 "category": cat,
                 "file_name": f.filename,
                 "size": size,
-                "url": f"/files/{fs.storage_path}",
+                "url": f"/files/{storage_path}",
             }
         )
     db.commit()
@@ -208,6 +212,21 @@ def delete_attachment(
     if ra is None:
         raise NotFoundError("附件不存在")
     db.delete(ra)
+    db.flush()  # session autoflush=False，先落删除再查引用
+    # 无其他引用时清理 Attachment / FileStore / 真实文件
+    att = db.get(Attachment, attachment_id)
+    still_ref = db.scalar(
+        select(ReimbursementAttachment.id).where(
+            ReimbursementAttachment.attachment_id == attachment_id
+        )
+    )
+    if att is not None and still_ref is None:
+        fs = db.get(FileStore, att.file_store_id)
+        db.delete(att)
+        if fs is not None:
+            with contextlib.suppress(OSError):
+                file_store_service.delete_upload(fs.storage_path)
+            db.delete(fs)
     db.commit()
 
 

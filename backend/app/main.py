@@ -33,7 +33,12 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
+# 前端静态目录（本地：仓库根/frontend；Docker：WORKDIR=/app/frontend）
+_frontend_candidates = [
+    Path(__file__).resolve().parent.parent.parent / "frontend",
+    Path(__file__).resolve().parent.parent / "frontend",
+]
+FRONTEND_DIR = next((p for p in _frontend_candidates if p.is_dir()), _frontend_candidates[0])
 
 
 @app.exception_handler(AppError)

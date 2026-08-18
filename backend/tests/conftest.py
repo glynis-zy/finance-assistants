@@ -2,6 +2,7 @@
 """pytest 公共 fixture：内存 SQLite + TestClient。"""
 
 from collections.abc import Generator
+from pathlib import Path
 
 import app.models  # noqa: F401  # type: ignore
 import pytest
@@ -32,7 +33,7 @@ def db_session() -> Generator[Session, None, None]:
 
 @pytest.fixture()
 def client(
-    db_session: Session, monkeypatch: pytest.MonkeyPatch
+    db_session: Session, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> Generator[TestClient, None, None]:
     """带依赖覆盖的 TestClient，并让 Celery 任务同步执行、复用测试 DB。"""
 
@@ -40,6 +41,12 @@ def client(
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # 附件真实写盘隔离：upload_dir 指向临时目录，测试不留垃圾文件
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "uploads"))
 
     # Celery 任务 run_audit_task 用测试 DB 的 session factory（内存 SQLite）
     test_engine = db_session.get_bind()

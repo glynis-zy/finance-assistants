@@ -29,19 +29,31 @@ Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · MySQL 8（可切 SQLite
 
 ## 当前状态
 
-**需求已冻结**——`docs/requirements.md` v1.0 评审通过。后续进入实现（backend + frontend + docker-compose + seed 演示数据）；实现中发现非阻塞边界问题按最简单可运行方案处理，不再扩大评审范围。
+**V1 部署闭环已完成**（Stage 1~6A）：三助手全部落地（报销审核 / 预算偏差监控 / 应收预警），共享平台接口与前端 MVP 就绪，附件真实持久化（backend 与 worker 共享存储），Docker 一键启动（init-db 自动迁移+seed）。真实 OCR/LLM/Webhook 厂商接入留待 Stage 6B。
 
 ## 快速启动（preset 模式，无需任何外部 Key）
 
+### 方式一：Docker 一键启动（推荐，MySQL + Redis + Celery 全栈）
+
+```bash
+docker compose down -v        # 首次或想重置数据时执行
+docker compose up --build     # 自动：mysql 就绪 → alembic 迁移 → seed → backend/worker/beat
+# 浏览器打开 http://localhost:8000
+```
+
+数据（MySQL 卷）与上传附件（uploads 卷）持久化在 Docker volume；`docker compose restart` 后数据与状态保持不变。
+
+### 方式二：本地直接跑（SQLite，无 Docker）
+
 ```bash
 cd backend
-python -m alembic upgrade head      # 建库（SQLite dev.db，可切 MySQL）
-PYTHONPATH=. python scripts/seed.py  # 灌演示数据并触发预算监控 + 应收评分
-uvicorn app.main:app --port 8000    # 启动（含前端静态托管）
+python -m alembic upgrade head
+PYTHONPATH=. python scripts/seed.py
+PYTHONPATH=. python -m uvicorn app.main:app --port 8000
 # 浏览器打开 http://127.0.0.1:8000
 ```
 
-不配置百度 OCR / DeepSeek / Webhook 任何 Key，靠 preset/auto 模式即可完整演示三助手。
+不配置百度 OCR / DeepSeek / Webhook 任何 Key，靠 preset/auto 模式即可完整演示三助手（real 厂商接入见 Stage 6B）。
 
 ## 演示账号（seed 内置）
 

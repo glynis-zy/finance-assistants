@@ -7,54 +7,76 @@ services:
       MYSQL_USER: finance
       MYSQL_PASSWORD: finance
     ports:
-      - "3306:3306"
+      - "3307:3306"  # 宿主 3307，避免与本机 MySQL 冲突（容器间通信仍走 mysql:3306）
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 12
 
   redis:
     image: redis:7
     ports:
       - "6379:6379"
 
+  # 一次性初始化：mysql healthy → 迁移到 head → seed（幂等）
+  init-db:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && python scripts/seed.py"
+    restart: "no"
+
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me-in-prod-0123456789abcdef
     ports:
       - "8000:8000"
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_started
+      init-db:
+        condition: service_completed_successfully
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   celery-worker:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
-      - redis
-      - mysql
+      init-db:
+        condition: service_completed_successfully
     command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info
 
   celery-beat:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
       REDIS_URL: redis://redis:6379/0
     depends_on:
-      - redis
-      - mysql
+      init-db:
+        condition: service_completed_successfully
     command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info
 
 volumes:
   mysql_data:
+  uploads_data:

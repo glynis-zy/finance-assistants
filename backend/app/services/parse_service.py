@@ -14,10 +14,11 @@ from app.clients import llm as llm_module
 from app.clients import ocr as ocr_module
 from app.core.config import get_settings
 from app.domain.risk_engine.types import ParsedDocument
-from app.models.base_data import Attachment
+from app.models.base_data import Attachment, FileStore
 from app.models.enums import DocParseStatus
 from app.models.reimbursement import DocParseResult, Reimbursement
 from app.schemas.documents import DOC_SCHEMAS
+from app.services import file_store_service
 
 
 def _validate(category: str, fields: dict[str, Any]) -> BaseModel | None:
@@ -62,9 +63,18 @@ def parse_attachments(
             )
             continue
 
-        # 新解析：OCR
+        # 新解析：从共享存储读取真实文件 bytes → OCR（worker 与 backend 同 uploads volume）
+        content: bytes | None = None
+        display_name = f"attachment-{att.id}"
+        fs = db.get(FileStore, att.file_store_id) if att.file_store_id else None
+        if fs is not None:
+            display_name = fs.file_name or display_name
+            try:
+                content = file_store_service.read_upload(fs.storage_path)
+            except OSError:
+                content = None  # 文件缺失不阻断（fail-closed 由后续置信度兜底）
         try:
-            ocr_result = ocr.parse(att.category, f"attachment-{att.id}", None)
+            ocr_result = ocr.parse(att.category, display_name, content)
         except Exception:
             ocr_result = None
         if ocr_result is None:

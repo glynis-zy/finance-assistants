@@ -29,6 +29,7 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    include=["app.tasks.audit", "app.tasks.budget", "app.tasks.ar"],
     beat_schedule={
         "budget-monitor": {
             "task": "app.tasks.budget.run_monitor",
