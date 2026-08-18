@@ -58,11 +58,11 @@ PROJECTS: list[dict[str, str]] = [
     {"code": "PJ-XC", "name": "新产品研发", "department_code": "RND", "owner": "钱七"},
 ]
 
-CATEGORIES: list[dict[str, str]] = [
-    {"code": "TRAVEL", "name": "差旅费"},
-    {"code": "OFFICE", "name": "办公费"},
-    {"code": "ENTERTAIN", "name": "业务招待费"},
-    {"code": "MEETING", "name": "会议费"},
+CATEGORIES: list[dict[str, object]] = [
+    {"code": "TRAVEL", "name": "差旅费", "keywords": ["高铁", "机票", "打车", "住宿", "差旅"]},
+    {"code": "OFFICE", "name": "办公费", "keywords": ["办公", "文具", "打印"]},
+    {"code": "ENTERTAIN", "name": "业务招待费", "keywords": ["招待", "餐饮", "宴请"]},
+    {"code": "MEETING", "name": "会议费", "keywords": ["会议", "场地"]},
 ]
 
 PARAMS: list[dict[str, str]] = [
@@ -71,6 +71,12 @@ PARAMS: list[dict[str, str]] = [
         "value": "180",
         "value_type": "int",
         "description": "发票允许报销区间（天）",
+    },
+    {
+        "key": "threshold.reimb.over_amount",
+        "value": "5000.00",
+        "value_type": "decimal",
+        "description": "单笔报销超标标准（元）",
     },
     {
         "key": "threshold.budget.progress_gap",
@@ -176,7 +182,11 @@ def seed(db: Session) -> None:
     for c in CATEGORIES:
         cat = db.scalar(select(CostCategory).where(CostCategory.code == c["code"]))
         if cat is None:
-            cat = CostCategory(code=c["code"], name=c["name"])
+            cat = CostCategory(
+                code=str(c["code"]),
+                name=str(c["name"]),
+                keyword_map=c.get("keywords"),
+            )
             db.add(cat)
 
     # 系统参数

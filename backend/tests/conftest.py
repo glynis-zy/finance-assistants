@@ -31,13 +31,27 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture()
-def client(db_session: Session) -> Generator[TestClient, None, None]:
-    """带依赖覆盖的 TestClient。"""
+def client(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> Generator[TestClient, None, None]:
+    """带依赖覆盖的 TestClient，并让 Celery 任务同步执行、复用测试 DB。"""
 
     def override_get_db() -> Generator[Session, None, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # Celery 任务 run_audit_task 用测试 DB 的 session factory（内存 SQLite）
+    test_engine = db_session.get_bind()
+    test_factory = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr("app.db.session.SessionLocal", test_factory)
+
+    # Celery eager：delay 同步执行；任务异常不传播（靠任务状态判断）
+    from app.tasks.celery_app import celery_app
+
+    monkeypatch.setattr(celery_app.conf, "task_always_eager", True)
+    monkeypatch.setattr(celery_app.conf, "task_eager_propagates", False)
+
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

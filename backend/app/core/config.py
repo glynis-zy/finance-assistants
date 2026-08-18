@@ -34,6 +34,23 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     debug: bool = False
 
+    # OCR / LLM 适配（tech-stack §3：preset / auto / real 三模式）
+    ocr_mode: str = "preset"
+    llm_mode: str = "preset"
+    # 抬头一致规则的参考抬头（本公司）
+    company_name: str = "某某科技有限公司"
+    # 解析置信度阈值（低于记入风险项）
+    ocr_confidence_threshold: float = 0.8
+    # 科目推荐 LLM 兜底置信度阈值（低于 → manual_review）
+    llm_confidence_threshold: float = 0.7
+    # 本地附件存储目录（real 模式落盘；preset 模式不读文件）
+    upload_dir: str = "uploads"
+    # 外部服务凭证（real 模式使用；未配置则 real 模式失败 / auto 回退 preset）
+    ocr_api_key: str = ""
+    ocr_secret_key: str = ""
+    llm_api_key: str = ""
+    llm_base_url: str = ""
+
     @property
     def celery_broker(self) -> str:
         """Celery broker URL，缺省回退到 redis_url。"""

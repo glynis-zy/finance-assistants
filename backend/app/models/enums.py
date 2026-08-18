@@ -33,6 +33,14 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
 
 
+class DocParseStatus(StrEnum):
+    """文档解析状态。"""
+
+    PENDING = "pending"
+    DONE = "done"
+    FAILED = "failed"
+
+
 class AttachmentCategory(StrEnum):
     """附件分类。"""
 
