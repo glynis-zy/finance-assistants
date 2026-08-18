@@ -390,7 +390,7 @@
 | **权限** | `ar:view` |
 | **允许状态** | — |
 | **Request** | Query：`limit`（默认 20）、`min_score`（默认 70，仅返回高风险） |
-| **Response** | `200 OK`：`{ "items": [ { "customer_id": 1, "customer_name": "某某科技", "risk_score": 82, "risk_level": "high", "overdue_amount": "450000.00", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28, "collection_priority": 1 } ] }`（风险分降序） |
+| **Response** | `200 OK`：`{ "items": [ { "customer_id": 1, "customer_name": "某某科技", "risk_score": 82, "risk_level": "high", "overdue_amount": "450000.00", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28, "collection_priority": 1 } ] }`（风险分降序，默认 `min_score=70`） |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
 | **副作用** | 无（只读） |
 
@@ -403,7 +403,7 @@
 | **权限** | `ar:view` |
 | **允许状态** | — |
 | **Request** | 路径参数 `customer_id` |
-| **Response** | `200 OK`：`{ "customer": {...}, "receivables": [ { "receivable_id", "contract_no", "amount", "due_date", "overdue_days", "status" } ], "factors": { "aging_score": 25, "term_score": 20, "payment_score": 18, "collection_score": 19 }, "total_score": 82, "risk_level": "high", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28 }` |
+| **Response** | `200 OK`：`{ "customer": {...}, "receivables": [ { "receivable_id", "contract_no", "amount", "due_date", "overdue_days", "status", "outstanding_balance" } ], "factors": { "aging": { "raw_score": 25.0, "weight": 0.4, "weighted_score": 10.0, "detail": "..." }, "term": { "raw_score": 20.0, "weight": 0.2, "weighted_score": 4.0 }, "payment": { "raw_score": 18.0, "weight": 0.3, "weighted_score": 5.4, "overdue_rate_score": 20.0, "delay_score": 16.0 }, "collection": { "raw_score": 19.0, "weight": 0.1, "weighted_score": 1.9 } }, "total_score": 82, "risk_level": "high", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28, "overdue_amount": "450000.00" }`（factors 每因子含 raw_score/weight/weighted_score，可含计算依据） |
 | **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND` |
 | **副作用** | 无（只读） |
 
@@ -458,6 +458,19 @@
 | **Response** | `201 Created`：`{ "record_id": 66, "customer_id": 1 }` |
 | **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（客户）`422 VALIDATION_ERROR` |
 | **副作用** | 写 `collection_record`；**触发该客户风险分重算**（异步任务，幂等；验证催收记录登记后风险分相应变化，权重可配） |
+
+### GET /api/ar/risk-status 评分任务状态
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/ar/risk-status` |
+| **方法** | `GET` |
+| **权限** | `ar:view` |
+| **允许状态** | — |
+| **Request** | 无 |
+| **Response** | `200 OK`：`{ "status": "done" \| "running" \| "queued" \| "failed", "started_at": "2026-08-18T00:30:10Z", "finished_at": "2026-08-18T00:30:45Z", "customer_count": 12, "high_risk_count": 3, "error": null }`（最近一次全量评分运行；无记录时 status=`never_run`） |
+| **错误码** | `401` `403 FORBIDDEN` |
+| **副作用** | 无（只读） |
 
 ---
 
@@ -735,6 +748,7 @@
 | 应收 | POST | `/api/ar/receivables` |
 | 应收 | POST | `/api/ar/payments` |
 | 应收 | POST | `/api/ar/collection-records` |
+| 应收 | GET | `/api/ar/risk-status` |
 | 预警 | GET | `/api/alerts` |
 | 预警 | POST | `/api/alerts/{id}/read` |
 | 基础数据 | GET/PUT | `/api/sys-params` / `/api/sys-params/{key}` |

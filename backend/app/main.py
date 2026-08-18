@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
-from app.routers import auth, budgets, deviations, health, reimbursements, sys_params
+from app.routers import ar, auth, budgets, deviations, health, reimbursements, sys_params
 
 settings = get_settings()
 
@@ -71,3 +71,4 @@ app.include_router(reimbursements.router, prefix=settings.api_prefix)
 app.include_router(reimbursements.audit_router, prefix=settings.api_prefix)
 app.include_router(budgets.router, prefix=settings.api_prefix)
 app.include_router(deviations.router, prefix=settings.api_prefix)
+app.include_router(ar.router, prefix=settings.api_prefix)

@@ -6,7 +6,17 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Date, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -71,18 +81,40 @@ class CollectionRecord(Base, PrimaryKeyMixin):
 
 
 class ArRiskScore(Base, PrimaryKeyMixin):
-    """应收风险评分结果。"""
+    """应收风险评分结果（每客户每评分日一条，同日 upsert 幂等）。"""
 
     __tablename__ = "ar_risk_score"
 
     customer_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("customer.id"), nullable=False, index=True
     )
+    score_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     factors: Mapped[Any] = mapped_column(JSON, nullable=True)
     total_score: Mapped[int] = mapped_column(Integer, nullable=False)
     risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
     expected_payment_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     expected_overdue_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    overdue_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False
     )
+
+    __table_args__ = (
+        UniqueConstraint("customer_id", "score_date", name="uq_ar_risk_customer_date"),
+    )
+
+
+class ArRiskRun(Base, PrimaryKeyMixin):
+    """应收全量评分任务运行状态（周期任务结果落 DB，可查最近一次运行）。"""
+
+    __tablename__ = "ar_risk_run"
+
+    status: Mapped[str] = mapped_column(String(16), default="running", nullable=False)
+    # queued/running/done/failed
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    customer_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    high_risk_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error: Mapped[str | None] = mapped_column(String(512), nullable=True)

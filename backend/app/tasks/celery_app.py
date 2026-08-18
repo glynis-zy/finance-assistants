@@ -34,8 +34,9 @@ celery_app.conf.update(
             "task": "app.tasks.budget.run_monitor",
             "schedule": crontab(hour=8, minute=0),  # 每日 08:00（UTC 或本地由 timezone 决定）
         },
-        # 应收预警任务（Stage 4+ 填充）：
-        # "ar-warning": {"task": "app.tasks.ar.run_warning",
-        #                "schedule": crontab(hour=8, minute=30)},
+        "ar-risk-warning": {
+            "task": "app.tasks.ar.run_risk",
+            "schedule": crontab(hour=8, minute=30),  # 每日 08:30 全量应收评分
+        },
     },
 )

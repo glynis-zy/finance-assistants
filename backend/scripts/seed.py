@@ -1,10 +1,11 @@
 """seed 初始化脚本。
 
 灌入用户 / 角色 / 权限 / 角色权限关系 / 部门 / 项目 / 费用科目 / 必要系统参数 /
-演示年度预算与台账（预算监控验收数据）。幂等：已存在则跳过。演示密码仅用于本地演示。
+演示年度预算与台账 / 演示客户合同应收付款催收（覆盖高中低风险），并触发一次
+预算监控与应收评分。幂等：已存在则跳过。演示密码仅用于本地演示。
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import TypedDict
 
 import app.models  # noqa: F401  # type: ignore
@@ -12,9 +13,12 @@ from app.core.perms import ROLE_PERMISSIONS
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
+from app.models.ar_domain import ArPayment, ArReceivable, CollectionRecord
 from app.models.base_data import (
     Budget,
+    Contract,
     CostCategory,
+    Customer,
     ExpenseLedger,
     OrgDepartment,
     Project,
@@ -157,6 +161,42 @@ PARAMS: list[dict[str, str]] = [
         "value": "70",
         "value_type": "int",
         "description": "高风险分数阈值",
+    },
+    {
+        "key": "threshold.ar.term_cap_days",
+        "value": "120",
+        "value_type": "int",
+        "description": "账期因子归一上限（天）",
+    },
+    {
+        "key": "threshold.ar.history_delay_cap_days",
+        "value": "90",
+        "value_type": "int",
+        "description": "历史回款延迟归一上限（天）",
+    },
+    {
+        "key": "threshold.ar.w_aging",
+        "value": "0.4",
+        "value_type": "float",
+        "description": "评分权重：账龄",
+    },
+    {
+        "key": "threshold.ar.w_term",
+        "value": "0.2",
+        "value_type": "float",
+        "description": "评分权重：账期",
+    },
+    {
+        "key": "threshold.ar.w_payment",
+        "value": "0.3",
+        "value_type": "float",
+        "description": "评分权重：历史付款",
+    },
+    {
+        "key": "threshold.ar.w_collection",
+        "value": "0.1",
+        "value_type": "float",
+        "description": "评分权重：催收记录",
     },
     {
         "key": "schedule.budget_monitor",
@@ -329,14 +369,135 @@ def seed(db: Session) -> None:
                 )
             )
 
+    # 演示应收数据（客户/合同/应收/付款/催收，覆盖高中低三档风险）
+    demo_customers: list[dict[str, str]] = [
+        {"code": "CUS-A", "name": "某某科技有限公司"},
+        {"code": "CUS-B", "name": "某某信息技术有限公司"},
+        {"code": "CUS-C", "name": "某某贸易有限公司"},
+    ]
+    customer_objs: dict[str, Customer] = {}
+    for c in demo_customers:
+        obj = db.scalar(select(Customer).where(Customer.code == c["code"]))
+        if obj is None:
+            obj = Customer(code=c["code"], name=c["name"], rating="A", credit=None)
+            db.add(obj)
+            db.flush()
+        customer_objs[c["code"]] = obj
+
+    demo_contracts: list[dict[str, object]] = [
+        {"no": "HT-A-001", "customer": "CUS-A", "amount": "500000.00", "term": 30},
+        {"no": "HT-B-001", "customer": "CUS-B", "amount": "300000.00", "term": 45},
+        {"no": "HT-C-001", "customer": "CUS-C", "amount": "100000.00", "term": 30},
+    ]
+    contract_objs: dict[str, Contract] = {}
+    for ct in demo_contracts:
+        obj = db.scalar(select(Contract).where(Contract.contract_no == str(ct["no"])))
+        if obj is None:
+            obj = Contract(
+                contract_no=str(ct["no"]),
+                customer_id=customer_objs[str(ct["customer"])].id,
+                amount=ct["amount"],  # type: ignore[arg-type]
+                payment_term=int(ct["term"]),  # type: ignore[arg-type]
+                status="executing",
+            )
+            db.add(obj)
+            db.flush()
+        contract_objs[str(ct["no"])] = obj
+
+    # 应收：A 高风险（逾期 200+ 未结 + 历史逾期结清 + 催收后未回款）
+    #       B 中风险（逾期 ~48 天未结 + 历史逾期结清）
+    #       C 低风险（全部结清，无未结）
+    demo_receivables: list[dict[str, object]] = [
+        {"inv": "FP-A-001", "contract": "HT-A-001", "amount": "100000.00", "due": "2025-12-01"},
+        {"inv": "FP-A-002", "contract": "HT-A-001", "amount": "200000.00", "due": "2026-01-01"},
+        {"inv": "FP-B-001", "contract": "HT-B-001", "amount": "150000.00", "due": "2026-07-01"},
+        {"inv": "FP-B-002", "contract": "HT-B-001", "amount": "80000.00", "due": "2026-06-01"},
+        {"inv": "FP-C-001", "contract": "HT-C-001", "amount": "50000.00", "due": "2026-05-01"},
+    ]
+    rec_objs: dict[str, ArReceivable] = {}
+    for r in demo_receivables:
+        obj = db.scalar(select(ArReceivable).where(ArReceivable.invoice_no == str(r["inv"])))
+        if obj is None:
+            obj = ArReceivable(
+                customer_id=contract_objs[str(r["contract"])].customer_id,
+                contract_id=contract_objs[str(r["contract"])].id,
+                invoice_no=str(r["inv"]),
+                amount=r["amount"],  # type: ignore[arg-type]
+                due_date=date.fromisoformat(str(r["due"])),
+                status="open",
+            )
+            db.add(obj)
+            db.flush()
+        rec_objs[str(r["inv"])] = obj
+
+    demo_payments: list[dict[str, object]] = [
+        {"inv": "FP-A-001", "amount": "100000.00", "at": "2026-01-30T00:00:00Z"},
+        {"inv": "FP-B-002", "amount": "80000.00", "at": "2026-07-01T00:00:00Z"},
+        {"inv": "FP-C-001", "amount": "50000.00", "at": "2026-05-10T00:00:00Z"},
+    ]
+    for p in demo_payments:
+        rec = rec_objs[str(p["inv"])]
+        exists = db.scalar(
+            select(ArPayment.id).where(
+                ArPayment.receivable_id == rec.id, ArPayment.amount == p["amount"]
+            )
+        )
+        if exists is None:
+            db.add(
+                ArPayment(
+                    receivable_id=rec.id,
+                    customer_id=rec.customer_id,
+                    amount=p["amount"],  # type: ignore[arg-type]
+                    received_at=datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00")),
+                )
+            )
+            # 结清后状态置 settled（演示数据直接定态）
+            if rec.invoice_no in ("FP-A-001", "FP-B-002", "FP-C-001"):
+                rec.status = "settled"
+
+    demo_collections: list[dict[str, object]] = [
+        {
+            "customer": "CUS-A",
+            "channel": "电话",
+            "result": "承诺回款",
+            "at": "2026-08-01T00:00:00Z",
+        },
+    ]
+    for c in demo_collections:
+        cust = customer_objs[str(c["customer"])]
+        exists = db.scalar(
+            select(CollectionRecord.id).where(
+                CollectionRecord.customer_id == cust.id,
+                CollectionRecord.occurred_at
+                == datetime.fromisoformat(str(c["at"]).replace("Z", "+00:00")),
+            )
+        )
+        if exists is None:
+            db.add(
+                CollectionRecord(
+                    customer_id=cust.id,
+                    channel=str(c["channel"]),
+                    result=str(c["result"]),
+                    occurred_at=datetime.fromisoformat(str(c["at"]).replace("Z", "+00:00")),
+                )
+            )
+
     db.commit()
 
 
 def main() -> None:
-    """建表 + 灌种子数据。"""
+    """建表 + 灌种子数据 + 触发一次监控与评分。"""
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed(db)
+        # 触发一次应收全量评分（幂等；仅演示链路可用，异常不阻断 seed）
+        try:
+            from app.services import ar_service
+
+            summary = ar_service.score_all(db, datetime.now(UTC).date())
+            print(f"应收评分完成：{summary}")
+        except Exception as exc:  # noqa: BLE001 - seed 演示链路不阻断
+            print(f"应收评分跳过：{exc}")
     print("seed 完成")
 
 

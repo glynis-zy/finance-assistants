@@ -166,13 +166,17 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 ### 5.3 应收域
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/ar/risk-ranking` | 高风险客户排名（风险分降序） |
-| GET | `/api/ar/{customer_id}/detail` | 客户应收明细 + 分项因子分 |
-| GET | `/api/ar/receivables` | 应收列表 |
-| POST | `/api/ar/receivables` | 登记应收 |
-| POST | `/api/ar/payments` | 登记回款 |
-| POST | `/api/ar/collection-records` | 登记催收记录 |
+| GET | `/api/ar/risk-ranking` | 高风险客户排名（最新评分，风险分降序，默认 min_score=70） |
+| GET | `/api/ar/{customer_id}/detail` | 客户应收明细 + 因子明细（raw/weight/weighted）+ 总分 |
+| GET | `/api/ar/receivables` | 应收列表（客户/状态/到期前过滤） |
+| POST | `/api/ar/receivables` | 登记应收（status 默认 open，合同须属客户） |
+| POST | `/api/ar/payments` | 登记回款（超额拒绝，按累计到账重算 status，触发该客户重算） |
+| POST | `/api/ar/collection-records` | 登记催收记录（触发该客户重算） |
+| GET | `/api/ar/risk-status` | 最近一次全量评分任务状态（ar_risk_run） |
 | GET | `/api/alerts` | 预警中心（类型/级别过滤，已读标记） |
+
+> 口径（Stage 4）：评分确定性规则（scoring_engine，无 LLM）；每客户每评分日一条
+> `ar_risk_score`（unique(customer_id, score_date)，同日 upsert）；beat 每日 08:30 全量评分。
 
 > 权限码、数据权限、状态权限全部在路由依赖层强制，见 §6。
 

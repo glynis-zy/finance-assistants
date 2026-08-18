@@ -7,6 +7,7 @@ from app.models.alert import Alert, Notification
 from app.models.ar_domain import (
     ArPayment,
     ArReceivable,
+    ArRiskRun,
     ArRiskScore,
     CollectionRecord,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "Notification",
     "ArPayment",
     "ArReceivable",
+    "ArRiskRun",
     "ArRiskScore",
     "CollectionRecord",
     "Attachment",
