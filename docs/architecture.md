@@ -155,7 +155,9 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 | GET | `/api/deviations` | 偏差明细（维度/期间/等级过滤） |
 | GET | `/api/deviations/summary` | 汇总（按维度聚合） |
 | GET | `/api/monitor/status` | 最近一次监控任务状态/快照 |
-| POST | `/api/budgets` | 建/调预算（留痕） |
+| GET | `/api/budgets` | 预算列表 |
+| POST | `/api/budgets` | 新建预算 |
+| PUT | `/api/budgets/{id}` | 调整预算（留痕） |
 | GET | `/api/sys-params`（管理） | 阈值/调度节奏读写 |
 
 ### 5.3 应收域
@@ -163,6 +165,9 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 |---|---|---|
 | GET | `/api/ar/risk-ranking` | 高风险客户排名（风险分降序） |
 | GET | `/api/ar/{customer_id}/detail` | 客户应收明细 + 分项因子分 |
+| GET | `/api/ar/receivables` | 应收列表 |
+| POST | `/api/ar/receivables` | 登记应收 |
+| POST | `/api/ar/payments` | 登记回款 |
 | POST | `/api/ar/collection-records` | 登记催收记录 |
 | GET | `/api/alerts` | 预警中心（类型/级别过滤，已读标记） |
 
@@ -178,6 +183,11 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 3. **L3 状态权限**：状态守卫表（动作 × 允许状态）显式校验，非前端隐藏。
 
 任何一层不过即 4xx。审计日志记录登录与关键变更。
+
+权限收口（v1.0 冻结，详见 api.md §0.4）：
+- finance 默认补 `budget:view`（对应其「查看台账与偏差」职责，requirements §3.1）。
+- `sys_param` 修改：`threshold.*` 键允许 `threshold:manage` 或 `sys:manage` 修改；其余键仅 `sys:manage`。
+- 预警可见性：`alert:view` 授予 finance / budget_manager / ar_specialist / admin（不授予 applicant）；预算类预警仅 finance / budget_manager 可见，应收类预警仅 finance / ar_specialist 可见，admin 全量可见。
 
 ---
 

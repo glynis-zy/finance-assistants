@@ -2,8 +2,8 @@
 
 > 财务智能助手平台 · 单平台 + 三助手
 > 依据：`docs/architecture.md` §5（API 设计概览）、`docs/requirements.md` §3（权限）/ §4（功能）/ §6（数据模型）
-> 版本：v0.1（实现契约）｜ 状态：评审稿（2026-08-18 与报销域接口一并确认）
-> 说明：认证接口与补充权限码为 api.md 依据架构 §2.3 `auth_service` / §6 权限架构补充定义，标注「补充」字样，待评审。
+> 版本：v1.0（实现契约）｜ 状态：已冻结（2026-08-18 收口）
+> 说明：认证接口与补充权限码为 api.md 依据架构 §2.3 `auth_service` / §6 权限架构补充定义；冻结后非核心接口不再扩展。
 
 ---
 
@@ -32,6 +32,7 @@
 | `INVALID_STATE` | 409 | L3 状态权限不允许（状态机冲突） |
 | `DUPLICATE_SUBMIT` | 409 | 重复提交（单据已在审核中） |
 | `DUPLICATE_INVOICE` | 409 | 重复发票（查重范围：已生效台账 + 未终结报销单） |
+| `RESOURCE_CONFLICT` | 409 | 资源冲突（科目编码、客户编码、合同号、用户名、预算维度等唯一约束重复） |
 | `REPORT_NOT_READY` | 409 | 报告尚未生成（无审核结论） |
 | `INTERNAL_ERROR` | 500 | 服务内部错误 |
 
@@ -73,14 +74,19 @@
 | `reimb:audit` | finance | requirements §3.1 |
 | `reimb:manual_review` | finance | requirements §3.1 |
 | `ledger:view` | finance | requirements §3.1 |
-| `budget:manage` / `budget:view` | budget_manager | requirements §3.1 |
+| `budget:manage` | budget_manager | requirements §3.1 |
+| `budget:view` | budget_manager、finance | requirements §3.1（finance 补：对应职责「查看台账与偏差」） |
 | `threshold:manage` | budget_manager | requirements §3.1 |
 | `ar:manage` / `ar:view` | ar_specialist | requirements §3.1 |
 | `user:manage` / `role:manage` / `sys:manage` | admin | requirements §3.1 |
 | `cost_category:manage` | admin | **补充**：科目维护 |
 | `ledger:import` | finance | **补充**：台账导入 |
-| `alert:view` | 全部角色 | **补充**：预警中心查看 |
+| `alert:view` | finance / budget_manager / ar_specialist / admin | **补充**：预警查看（按业务域过滤，见下） |
 | `alert:manage` | admin | **补充**：预警已读/管理 |
+
+> **权限收口（v1.0）**
+> - `sys_param` 修改：`threshold.*` 键允许 `threshold:manage` 或 `sys:manage` 修改；其余键仅 `sys:manage`。
+> - 预警可见性按业务域过滤：`budget` 类预警 → finance / budget_manager；`ar` 类预警 → finance / ar_specialist；admin 全量；applicant 不授予 `alert:view`。
 
 ### 0.5 状态与枚举速查
 
@@ -90,9 +96,11 @@
 | 审核结论 `result` | `approved` / `returned` / `manual_review` |
 | 任务 `status` | `queued`（排队）`parsing`（解析中）`done`（完成）`failed`（失败） |
 | 附件 `category` | `invoice`（发票）`travel`（行程单）`approval`（审批单） |
-| 偏差/预警 `level` | `info` / `warning` / `critical` |
+| 偏差 `budget_deviation.level` | `low` / `medium` / `high` |
+| 预警 `alert.level` | `info` / `warning` / `critical`（独立枚举，不与偏差共用） |
 | 预警 `alert_type` | `budget` / `ar` |
 | 应收风险 `risk_level` | `low` / `medium` / `high`（`score ≥ 70` 为 `high`） |
+| 应收单 `status` | `open`（未回款）/ `partial`（部分回款）/ `settled`（已结清）；由服务端按累计到账维护；逾期为动态判断（`current_date > due_date && status != settled`），不作为状态值 |
 
 ---
 
@@ -204,9 +212,9 @@
 | **方法** | `POST` |
 | **权限** | `reimb:create`（仅本人） |
 | **允许状态** | `draft` / `returned`（其余 → `409 INVALID_STATE`） |
-| **Request** | `multipart/form-data`：`files`（多文件）、`category`（`invoice`/`travel`/`approval`，本接口一次请求内统一一种分类） |
+| **Request** | `multipart/form-data`：`files[]`（多文件）、`categories[]`（与 `files[]` 一一对应，取值 `invoice`/`travel`/`approval`）；两数组长度必须一致，否则 `422` |
 | **Response** | `201 Created`：`{ "attachments": [ { "attachment_id": 88, "category": "invoice", "file_name": "0510_xxx.jpg", "size": 245760, "url": "/files/2026/08/18/xxx.jpg" } ] }` |
-| **错误码** | `401` `403 FORBIDDEN` `403 FORBIDDEN_SCOPE` `404 NOT_FOUND` `409 INVALID_STATE` `422 VALIDATION_ERROR`（category 非法、空文件） |
+| **错误码** | `401` `403 FORBIDDEN` `403 FORBIDDEN_SCOPE` `404 NOT_FOUND` `409 INVALID_STATE` `422 VALIDATION_ERROR`（categories 取值非法、空文件、files 与 categories 数量不一致） |
 | **副作用** | 写 `file_store` + `reimbursement_attachment`；**不触发解析**（解析在 submit 时） |
 
 ### DELETE /api/reimbursements/{id}/attachments/{attachment_id} 删除附件
@@ -299,7 +307,7 @@
 | **方法** | `GET` |
 | **权限** | `budget:view` |
 | **允许状态** | — |
-| **Request** | Query：`dimension`（`department`/`project`/`cost_category`）、`level`（`info`/`warning`/`critical`）、`period_from`、`period_to`、`page`、`page_size` |
+| **Request** | Query：`dimension`（`department`/`project`/`cost_category`）、`level`（`low`/`medium`/`high`）、`period_from`、`period_to`、`page`、`page_size` |
 | **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "dimension_type", "dimension_id", "dimension_name", "period", "budget_amount", "actual_amount", "deviation_amount", "deviation_ratio", "level", "owner", "status" }` |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR`（枚举非法） |
 | **副作用** | 无（只读） |
@@ -313,7 +321,7 @@
 | **权限** | `budget:view` |
 | **允许状态** | — |
 | **Request** | Query：`group_by`（`department`/`project`/`cost_category`）、`period`、`level`（可选） |
-| **Response** | `200 OK`：`{ "groups": [ { "key": 1, "name": "销售部", "budget_total": "1200000.00", "actual_total": "1350000.00", "deviation_amount": "150000.00", "deviation_ratio": "0.125", "level": "critical" } ] }` |
+| **Response** | `200 OK`：`{ "groups": [ { "key": 1, "name": "销售部", "budget_total": "1200000.00", "actual_total": "1350000.00", "deviation_amount": "150000.00", "deviation_ratio": "0.125", "level": "high" } ] }` |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
 | **副作用** | 无（只读） |
 
@@ -330,7 +338,20 @@
 | **错误码** | `401` `403 FORBIDDEN` |
 | **副作用** | 无（只读） |
 
-### POST /api/budgets 建/调预算
+### GET /api/budgets 预算列表
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/budgets` |
+| **方法** | `GET` |
+| **权限** | `budget:view` |
+| **允许状态** | — |
+| **Request** | Query：`department_id`、`project_id`、`cost_category_id`、`period_from`、`period_to`、`page`、`page_size` |
+| **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "department_id", "project_id", "cost_category_id", "period", "amount", "allocation_curve", "created_at", "updated_at" }` |
+| **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
+| **副作用** | 无（只读） |
+
+### POST /api/budgets 新建预算
 
 | 项 | 内容 |
 |---|---|
@@ -338,10 +359,23 @@
 | **方法** | `POST` |
 | **权限** | `budget:manage` |
 | **允许状态** | — |
-| **Request** | `application/json`：`{ "department_id": 1, "project_id": 2, "cost_category_id": 3, "period": "2026-08", "amount": "100000.00", "allocation_curve": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05] }`（追加/调整同样式，服务端留痕） |
-| **Response** | `201 Created`：`{ "budget_id": 501, "period": "2026-08", "amount": "100000.00", "adjustment_id": 9 }` |
-| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（部门/项目/科目）`409 DUPLICATE_INVOICE`（同维度期间已存在，应走调整）`422 VALIDATION_ERROR` |
-| **副作用** | 写 `budget` + 调整记录（留痕）；写 `audit_log`；影响下一次监控任务（参数化，不改代码） |
+| **Request** | `application/json`：`{ "department_id": 1, "project_id": 2, "cost_category_id": 3, "period": "2026-08", "amount": "100000.00", "allocation_curve": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05] }` |
+| **Response** | `201 Created`：`{ "budget_id": 501, "period": "2026-08", "amount": "100000.00" }` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（部门/项目/科目）`409 RESOURCE_CONFLICT`（同维度期间已存在，应走 PUT 调整）`422 VALIDATION_ERROR` |
+| **副作用** | 写 `budget`；写 `audit_log`；影响下一次监控任务（参数化，不改代码） |
+
+### PUT /api/budgets/{id} 调整预算
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/budgets/{id}` |
+| **方法** | `PUT` |
+| **权限** | `budget:manage` |
+| **允许状态** | — |
+| **Request** | `application/json`：`{ "amount": "120000.00", "allocation_curve": [...] }`（调整金额，可附新分摊曲线） |
+| **Response** | `200 OK`：`{ "id": 501, "period": "2026-08", "amount": "120000.00", "adjustment_id": 10 }` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND` `422 VALIDATION_ERROR` |
+| **副作用** | 写 `budget`（更新）+ 调整记录（留痕）；写 `audit_log`；影响下一次监控任务 |
 
 ---
 
@@ -356,7 +390,7 @@
 | **权限** | `ar:view` |
 | **允许状态** | — |
 | **Request** | Query：`limit`（默认 20）、`min_score`（默认 70，仅返回高风险） |
-| **Response** | `200 OK`：`{ "items": [ { "customer_id": 1, "customer_name": "某某科技", "risk_score": 82, "risk_level": "high", "overdue_amount": "450000.00", "expected_overdue_date": "2026-09-15", "collection_priority": 1 } ] }`（风险分降序） |
+| **Response** | `200 OK`：`{ "items": [ { "customer_id": 1, "customer_name": "某某科技", "risk_score": 82, "risk_level": "high", "overdue_amount": "450000.00", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28, "collection_priority": 1 } ] }`（风险分降序） |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
 | **副作用** | 无（只读） |
 
@@ -369,9 +403,48 @@
 | **权限** | `ar:view` |
 | **允许状态** | — |
 | **Request** | 路径参数 `customer_id` |
-| **Response** | `200 OK`：`{ "customer": {...}, "receivables": [ { "receivable_id", "contract_no", "amount", "due_date", "overdue_days", "status" } ], "factors": { "aging_score": 25, "term_score": 20, "payment_score": 18, "collection_score": 19 }, "total_score": 82, "risk_level": "high", "expected_overdue_date": "2026-09-15" }` |
+| **Response** | `200 OK`：`{ "customer": {...}, "receivables": [ { "receivable_id", "contract_no", "amount", "due_date", "overdue_days", "status" } ], "factors": { "aging_score": 25, "term_score": 20, "payment_score": 18, "collection_score": 19 }, "total_score": 82, "risk_level": "high", "expected_payment_date": "2026-09-15", "expected_overdue_days": 28 }` |
 | **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND` |
 | **副作用** | 无（只读） |
+
+### GET /api/ar/receivables 应收列表
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/ar/receivables` |
+| **方法** | `GET` |
+| **权限** | `ar:view` |
+| **允许状态** | — |
+| **Request** | Query：`customer_id`、`status`（`open`/`partial`/`settled`，可选）、`due_before`（可选）、`page`、`page_size` |
+| **Response** | `200 OK` 分页：`items` 元素含 `{ "receivable_id", "customer_id", "customer_name", "contract_no", "amount", "due_date", "overdue_days", "status" }`（`status` 由服务端维护，逾期由 `overdue_days > 0` 表达） |
+| **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
+| **副作用** | 无（只读） |
+
+### POST /api/ar/receivables 登记应收
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/ar/receivables` |
+| **方法** | `POST` |
+| **权限** | `ar:manage` |
+| **允许状态** | — |
+| **Request** | `application/json`：`{ "customer_id": 1, "contract_id": 1, "invoice_no": "FP-2026-001", "amount": "500000.00", "due_date": "2026-09-15" }`（**不传 `status`**，由服务端初始化） |
+| **Response** | `201 Created`：`{ "receivable_id": 88, "customer_id": 1, "status": "open" }` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（客户/合同）`422 VALIDATION_ERROR` |
+| **副作用** | 写 `ar_receivable`（`status` 初始 `open`）+ `audit_log`；影响下一次评分任务 |
+
+### POST /api/ar/payments 登记回款
+
+| 项 | 内容 |
+|---|---|
+| **路径** | `/api/ar/payments` |
+| **方法** | `POST` |
+| **权限** | `ar:manage` |
+| **允许状态** | — |
+| **Request** | `application/json`：`{ "receivable_id": 88, "customer_id": 1, "amount": "200000.00", "received_at": "2026-08-18T02:00:00Z", "remark": "" }` |
+| **Response** | `201 Created`：`{ "payment_id": 45, "receivable_id": 88 }` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（应收/客户）`422 VALIDATION_ERROR` |
+| **副作用** | 写 `ar_payment`；按累计到账重算 `ar_receivable.status`（open/partial/settled）；**触发该客户风险分重算**（异步任务，幂等） |
 
 ### POST /api/ar/collection-records 登记催收记录
 
@@ -396,7 +469,7 @@
 |---|---|
 | **路径** | `/api/alerts` |
 | **方法** | `GET` |
-| **权限** | `alert:view`（全部角色） |
+| **权限** | `alert:view`（finance / budget_manager / ar_specialist / admin，**不授予 applicant**）；按业务域过滤：`budget` 预警 → finance / budget_manager，`ar` 预警 → finance / ar_specialist，admin 全量 |
 | **允许状态** | — |
 | **Request** | Query：`alert_type`（`budget`/`ar`，可选）、`level`（可选）、`read`（可选布尔）、`page`、`page_size` |
 | **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "alert_type", "level", "summary", "detail", "created_at", "read" }` |
@@ -441,7 +514,7 @@
 |---|---|
 | **路径** | `/api/sys-params/{key}` |
 | **方法** | `PUT` |
-| **权限** | `sys:manage`（阈值/调度节奏运行时调整，见需求 7.4） |
+| **权限** | `threshold.*` 键：`threshold:manage` 或 `sys:manage`；其余键：仅 `sys:manage` |
 | **允许状态** | — |
 | **Request** | `application/json`：`{ "value": "120" }` |
 | **Response** | `200 OK`：`{ "key": "threshold.reimb.date_window_days", "value": "120", "updated_at": "..." }` |
@@ -471,7 +544,7 @@
 | **允许状态** | — |
 | **Request** | `application/json`：`{ "code": "ENTERTAIN", "name": "业务招待费", "parent_id": null, "enabled": true, "invoice_type_map": {...}, "keyword_map": {...} }` |
 | **Response** | `201 Created`：`{ "id": 9, "code": "ENTERTAIN", "name": "业务招待费" }` |
-| **错误码** | `401` `403 FORBIDDEN` `409 DUPLICATE_INVOICE`（code 重复）`422 VALIDATION_ERROR` |
+| **错误码** | `401` `403 FORBIDDEN` `409 RESOURCE_CONFLICT`（code 重复）`422 VALIDATION_ERROR` |
 | **副作用** | 写 `cost_category` + `audit_log` |
 
 ### PUT /api/cost-categories/{id} 更新科目
@@ -536,7 +609,7 @@
 | **允许状态** | — |
 | **Request** | `application/json`：`{ "code": "C-002", "name": "某某制造", "rating": "B", "credit": "200000.00" }` |
 | **Response** | `201 Created`：`{ "id": 2, "code": "C-002", "name": "某某制造" }` |
-| **错误码** | `401` `403 FORBIDDEN` `409 DUPLICATE_INVOICE`（code 重复）`422 VALIDATION_ERROR` |
+| **错误码** | `401` `403 FORBIDDEN` `409 RESOURCE_CONFLICT`（code 重复）`422 VALIDATION_ERROR` |
 | **副作用** | 写 `customer` + `audit_log` |
 
 ### GET /api/contracts 合同列表
@@ -562,7 +635,7 @@
 | **允许状态** | — |
 | **Request** | `application/json`：`{ "contract_no": "HT-2026-002", "customer_id": 1, "amount": "300000.00", "payment_term": 45, "status": "executing" }` |
 | **Response** | `201 Created`：`{ "id": 2, "contract_no": "HT-2026-002" }` |
-| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（客户）`409 DUPLICATE_INVOICE`（合同号重复）`422 VALIDATION_ERROR` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（客户）`409 RESOURCE_CONFLICT`（合同号重复）`422 VALIDATION_ERROR` |
 | **副作用** | 写 `contract` + `audit_log` |
 
 ### GET /api/ledger 支出台账查询
@@ -614,7 +687,7 @@
 | **允许状态** | — |
 | **Request** | `application/json`：`{ "username": "li.si", "name": "李四", "password": "******", "roles": ["finance"] }` |
 | **Response** | `201 Created`：`{ "id": 2, "username": "li.si", "roles": ["finance"] }` |
-| **错误码** | `401` `403 FORBIDDEN` `409 DUPLICATE_INVOICE`（用户名重复）`422 VALIDATION_ERROR` |
+| **错误码** | `401` `403 FORBIDDEN` `409 RESOURCE_CONFLICT`（用户名重复）`422 VALIDATION_ERROR` |
 | **副作用** | 写 `sys_user` + 角色关联 + `audit_log` |
 
 ### GET /api/roles 角色列表（系统管理）
@@ -653,9 +726,14 @@
 | 预算 | GET | `/api/deviations` |
 | 预算 | GET | `/api/deviations/summary` |
 | 预算 | GET | `/api/monitor/status` |
+| 预算 | GET | `/api/budgets` |
 | 预算 | POST | `/api/budgets` |
+| 预算 | PUT | `/api/budgets/{id}` |
 | 应收 | GET | `/api/ar/risk-ranking` |
 | 应收 | GET | `/api/ar/{customer_id}/detail` |
+| 应收 | GET | `/api/ar/receivables` |
+| 应收 | POST | `/api/ar/receivables` |
+| 应收 | POST | `/api/ar/payments` |
 | 应收 | POST | `/api/ar/collection-records` |
 | 预警 | GET | `/api/alerts` |
 | 预警 | POST | `/api/alerts/{id}/read` |

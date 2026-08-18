@@ -3,6 +3,7 @@
 > 项目：财务智能助手平台（Finance Assistants）
 > 出处：`zy-项目实战.md` 第 3.3 节「财务管理」
 > 版本：v1.0（已冻结）｜ 状态：需求冻结（2026-08-18 评审通过）
+> 修订：2026-08-18 权限码遗漏修正——`finance` 补 `budget:view`（职责「查看台账与偏差」的权限码补全，非新增需求）。
 
 ---
 
@@ -67,7 +68,7 @@
 | 角色 | 职责 | 核心权限码 |
 |---|---|---|
 | 报销申请人 `applicant` | 提交/编辑报销单、查看自己的审核结论 | `reimb:create` `reimb:view_own` |
-| 财务审核 `finance` | 审核报销、人工复核存疑单、查看台账与偏差 | `reimb:audit` `reimb:manual_review` `ledger:view` |
+| 财务审核 `finance` | 审核报销、人工复核存疑单、查看台账与偏差 | `reimb:audit` `reimb:manual_review` `ledger:view` `budget:view` |
 | 预算管理员 `budget_manager` | 维护预算、配置偏差阈值、查看偏差与预警 | `budget:manage` `budget:view` `threshold:manage` |
 | 应收专员 `ar_specialist` | 维护客户/合同/应收、查看风险排名与催收优先级、登记催收记录 | `ar:manage` `ar:view` |
 | 系统管理员 `admin` | 用户/角色/系统参数管理 | `user:manage` `role:manage` `sys:manage` |
