@@ -106,7 +106,7 @@ def seed_base(db: Session) -> BaseData:
             department_id=dept.id,
             project_id=proj.id,
             cost_category_id=travel.id,
-            period=period,
+            budget_year=period[:4],
             amount=Decimal("100000.00"),
         )
     )

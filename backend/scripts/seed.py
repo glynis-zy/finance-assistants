@@ -1,9 +1,10 @@
 """seed 初始化脚本。
 
-灌入用户 / 角色 / 权限 / 角色权限关系 / 部门 / 项目 / 费用科目 / 必要系统参数。
-幂等：已存在则跳过。演示密码仅用于本地演示。
+灌入用户 / 角色 / 权限 / 角色权限关系 / 部门 / 项目 / 费用科目 / 必要系统参数 /
+演示年度预算与台账（预算监控验收数据）。幂等：已存在则跳过。演示密码仅用于本地演示。
 """
 
+from datetime import UTC, datetime
 from typing import TypedDict
 
 import app.models  # noqa: F401  # type: ignore
@@ -11,7 +12,14 @@ from app.core.perms import ROLE_PERMISSIONS
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.models.base_data import CostCategory, OrgDepartment, Project, SysParam
+from app.models.base_data import (
+    Budget,
+    CostCategory,
+    ExpenseLedger,
+    OrgDepartment,
+    Project,
+    SysParam,
+)
 from app.models.rbac import SysPermission, SysRole, SysUser
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -85,10 +93,64 @@ PARAMS: list[dict[str, str]] = [
         "description": "进度异常阈值",
     },
     {
+        "key": "threshold.budget.level_low",
+        "value": "0.05",
+        "value_type": "float",
+        "description": "偏差等级 low 上界（<5% low）",
+    },
+    {
+        "key": "threshold.budget.level_high",
+        "value": "0.20",
+        "value_type": "float",
+        "description": "偏差等级 high 下界（>20% high）",
+    },
+    {
+        "key": "threshold.budget.growth_mom",
+        "value": "0.30",
+        "value_type": "float",
+        "description": "环比增幅阈值",
+    },
+    {
+        "key": "threshold.budget.growth_yoy",
+        "value": "0.50",
+        "value_type": "float",
+        "description": "同比增幅阈值",
+    },
+    {
+        "key": "threshold.budget.signal_consecutive",
+        "value": "2",
+        "value_type": "int",
+        "description": "统计信号连续期数升级阈值",
+    },
+    {
+        "key": "threshold.budget.ewma_lambda",
+        "value": "0.30",
+        "value_type": "float",
+        "description": "EWMA 平滑系数",
+    },
+    {
+        "key": "threshold.budget.ewma_delta",
+        "value": "0.30",
+        "value_type": "float",
+        "description": "EWMA 触发偏差阈值",
+    },
+    {
+        "key": "threshold.budget.cusum_h",
+        "value": "0.10",
+        "value_type": "float",
+        "description": "CUSUM 触发阈值（占年度预算比例）",
+    },
+    {
+        "key": "threshold.budget.mad_z",
+        "value": "3.0",
+        "value_type": "float",
+        "description": "MAD 修正 Z-score 离群阈值",
+    },
+    {
         "key": "threshold.budget.over_budget",
         "value": "0.20",
         "value_type": "float",
-        "description": "超预算判定阈值",
+        "description": "超预算判定阈值（保留兼容）",
     },
     {
         "key": "threshold.ar.high_score",
@@ -200,6 +262,72 @@ def seed(db: Session) -> None:
                 description=p["description"],
             )
             db.add(param)
+
+    # 演示年度预算（销售部 TRAVEL 120 万 / 研发部 TRAVEL 50 万，含 12 个月分摊曲线）
+    curve = [0.1] * 8 + [0.05] * 4  # 12 项合计 1
+    demo_budgets: list[dict[str, object]] = [
+        {
+            "department_code": "SALES",
+            "project_code": "PJ-HD",
+            "category_code": "TRAVEL",
+            "budget_year": "2026",
+            "amount": "1200000.00",
+            "curve": curve,
+        },
+        {
+            "department_code": "RND",
+            "project_code": "PJ-XC",
+            "category_code": "TRAVEL",
+            "budget_year": "2026",
+            "amount": "500000.00",
+            "curve": curve,
+        },
+    ]
+    db.flush()  # 确保部门/项目/科目已持久化，供演示预算/台账引用
+    dept_by_code = {d.code: d for d in db.scalars(select(OrgDepartment)).all()}
+    proj_by_code = {p.code: p for p in db.scalars(select(Project)).all()}
+    cat_by_code = {c.code: c for c in db.scalars(select(CostCategory)).all()}
+    for item in demo_budgets:
+        exists = db.scalar(
+            select(Budget.id).where(
+                Budget.department_id == dept_by_code[str(item["department_code"])].id,
+                Budget.project_id == proj_by_code[str(item["project_code"])].id,
+                Budget.cost_category_id == cat_by_code[str(item["category_code"])].id,
+                Budget.budget_year == str(item["budget_year"]),
+            )
+        )
+        if exists is None:
+            db.add(
+                Budget(
+                    department_id=dept_by_code[str(item["department_code"])].id,
+                    project_id=proj_by_code[str(item["project_code"])].id,
+                    cost_category_id=cat_by_code[str(item["category_code"])].id,
+                    budget_year=str(item["budget_year"]),
+                    amount=item["amount"],  # type: ignore[arg-type]
+                    allocation_curve=item["curve"],
+                )
+            )
+
+    # 演示台账：销售部 TRAVEL 2026-01~06 每月 10 万（累计 60 万 = 计划 60 万，验证不误报进度异常）
+    sales_dept = dept_by_code["SALES"]
+    pj_hd = proj_by_code["PJ-HD"]
+    travel = cat_by_code["TRAVEL"]
+    for month in range(1, 7):
+        ref_no = f"SEED-BUDGET-2026-{month:02d}"
+        exists = db.scalar(select(ExpenseLedger.id).where(ExpenseLedger.ref_no == ref_no))
+        if exists is None:
+            db.add(
+                ExpenseLedger(
+                    source="import",
+                    cost_category_id=travel.id,
+                    department_id=sales_dept.id,
+                    project_id=pj_hd.id,
+                    period=f"2026-{month:02d}",
+                    amount="100000.00",
+                    occurred_at=datetime(2026, month, 15, tzinfo=UTC),
+                    ref_no=ref_no,
+                )
+            )
 
     db.commit()
 

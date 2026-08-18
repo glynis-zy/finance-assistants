@@ -13,7 +13,7 @@ from app.models.mixins import PrimaryKeyMixin, utcnow
 
 
 class Alert(Base, PrimaryKeyMixin):
-    """预警（类型/级别/摘要/详情/产生任务/已读）。"""
+    """预警（类型/级别/摘要/详情/产生任务/已读，unique_key 保证幂等）。"""
 
     __tablename__ = "alert"
 
@@ -21,6 +21,9 @@ class Alert(Base, PrimaryKeyMixin):
     level: Mapped[str] = mapped_column(
         String(16), nullable=False, index=True
     )  # info/warning/critical
+    unique_key: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, unique=True
+    )  # 幂等键，如 budget:{period}:{dept}:{proj}:{cat}
     summary: Mapped[str] = mapped_column(String(256), nullable=False)
     detail: Mapped[Any] = mapped_column(JSON, nullable=True)
     source_task_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

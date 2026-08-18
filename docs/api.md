@@ -307,8 +307,8 @@
 | **方法** | `GET` |
 | **权限** | `budget:view` |
 | **允许状态** | — |
-| **Request** | Query：`dimension`（`department`/`project`/`cost_category`）、`level`（`low`/`medium`/`high`）、`period_from`、`period_to`、`page`、`page_size` |
-| **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "dimension_type", "dimension_id", "dimension_name", "period", "budget_amount", "actual_amount", "deviation_amount", "deviation_ratio", "level", "owner", "status" }` |
+| **Request** | Query：`department_id`、`project_id`、`cost_category_id`、`level`（`low`/`medium`/`high`）、`period_from`、`period_to`、`page`、`page_size` |
+| **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "department_id", "department_name", "project_id", "project_name", "cost_category_id", "cost_category_name", "period", "budget_amount", "actual_amount", "deviation_amount", "deviation_ratio", "level", "owner", "trigger_reason" }` |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR`（枚举非法） |
 | **副作用** | 无（只读） |
 
@@ -321,7 +321,7 @@
 | **权限** | `budget:view` |
 | **允许状态** | — |
 | **Request** | Query：`group_by`（`department`/`project`/`cost_category`）、`period`、`level`（可选） |
-| **Response** | `200 OK`：`{ "groups": [ { "key": 1, "name": "销售部", "budget_total": "1200000.00", "actual_total": "1350000.00", "deviation_amount": "150000.00", "deviation_ratio": "0.125", "level": "high" } ] }` |
+| **Response** | `200 OK`：`{ "groups": [ { "key": 1, "name": "销售部", "budget_total": "1200000.00", "actual_total": "1350000.00", "deviation_amount": "150000.00", "deviation_ratio": "0.125", "level": "medium" } ] }`（查询层 group_by 聚合） |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
 | **副作用** | 无（只读） |
 
@@ -346,8 +346,8 @@
 | **方法** | `GET` |
 | **权限** | `budget:view` |
 | **允许状态** | — |
-| **Request** | Query：`department_id`、`project_id`、`cost_category_id`、`period_from`、`period_to`、`page`、`page_size` |
-| **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "department_id", "project_id", "cost_category_id", "period", "amount", "allocation_curve", "created_at", "updated_at" }` |
+| **Request** | Query：`department_id`、`project_id`、`cost_category_id`、`year_from`、`year_to`、`page`、`page_size` |
+| **Response** | `200 OK` 分页：`items` 元素含 `{ "id", "department_id", "project_id", "cost_category_id", "budget_year", "amount", "allocation_curve", "created_at", "updated_at" }` |
 | **错误码** | `401` `403 FORBIDDEN` `422 VALIDATION_ERROR` |
 | **副作用** | 无（只读） |
 
@@ -359,9 +359,9 @@
 | **方法** | `POST` |
 | **权限** | `budget:manage` |
 | **允许状态** | — |
-| **Request** | `application/json`：`{ "department_id": 1, "project_id": 2, "cost_category_id": 3, "period": "2026-08", "amount": "100000.00", "allocation_curve": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05] }` |
-| **Response** | `201 Created`：`{ "budget_id": 501, "period": "2026-08", "amount": "100000.00" }` |
-| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（部门/项目/科目）`409 RESOURCE_CONFLICT`（同维度期间已存在，应走 PUT 调整）`422 VALIDATION_ERROR` |
+| **Request** | `application/json`：`{ "department_id": 1, "project_id": 2, "cost_category_id": 3, "budget_year": "2026", "amount": "1200000.00", "allocation_curve": [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.05, 0.05, 0.05, 0.05] }`（`allocation_curve` 长度必须 12、每项 ≥ 0、合计 = 1，允许 0.0001 误差） |
+| **Response** | `201 Created`：`{ "budget_id": 501, "budget_year": "2026", "amount": "1200000.00" }` |
+| **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND`（部门/项目/科目）`409 RESOURCE_CONFLICT`（同部门×项目×科目×年度已存在，应走 PUT 调整）`422 VALIDATION_ERROR`（曲线长度/合计不合法） |
 | **副作用** | 写 `budget`；写 `audit_log`；影响下一次监控任务（参数化，不改代码） |
 
 ### PUT /api/budgets/{id} 调整预算
@@ -372,8 +372,8 @@
 | **方法** | `PUT` |
 | **权限** | `budget:manage` |
 | **允许状态** | — |
-| **Request** | `application/json`：`{ "amount": "120000.00", "allocation_curve": [...] }`（调整金额，可附新分摊曲线） |
-| **Response** | `200 OK`：`{ "id": 501, "period": "2026-08", "amount": "120000.00", "adjustment_id": 10 }` |
+| **Request** | `application/json`：`{ "amount": "1300000.00", "allocation_curve": [...], "reason": "下半年扩编" }`（调整金额/分摊曲线，可附原因；至少一项） |
+| **Response** | `200 OK`：`{ "budget_id": 501, "budget_year": "2026", "amount": "1300000.00", "adjustment_id": 10 }` |
 | **错误码** | `401` `403 FORBIDDEN` `404 NOT_FOUND` `422 VALIDATION_ERROR` |
 | **副作用** | 写 `budget`（更新）+ 调整记录（留痕）；写 `audit_log`；影响下一次监控任务 |
 

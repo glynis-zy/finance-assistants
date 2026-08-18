@@ -152,13 +152,16 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 ### 5.2 预算域
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/deviations` | 偏差明细（维度/期间/等级过滤） |
-| GET | `/api/deviations/summary` | 汇总（按维度聚合） |
+| GET | `/api/deviations` | 偏差明细（部门/项目/科目/期间/等级过滤） |
+| GET | `/api/deviations/summary` | 汇总（按部门/项目/科目聚合） |
 | GET | `/api/monitor/status` | 最近一次监控任务状态/快照 |
-| GET | `/api/budgets` | 预算列表 |
-| POST | `/api/budgets` | 新建预算 |
-| PUT | `/api/budgets/{id}` | 调整预算（留痕） |
+| GET | `/api/budgets` | 预算列表（budget_year 年度过滤） |
+| POST | `/api/budgets` | 新建年度预算（budget_year + 12 个月分摊曲线） |
+| PUT | `/api/budgets/{id}` | 调整预算（写 BudgetAdjustment 留痕） |
 | GET | `/api/sys-params`（管理） | 阈值/调度节奏读写 |
+
+> 口径（Stage 3 修正）：预算粒度 = 部门×项目×科目×年度（`budget_year=YYYY`），
+> 偏差事实记录按 部门×项目×科目×期间（`YYYY-MM`）存储；汇总在查询层按维度聚合。
 
 ### 5.3 应收域
 | 方法 | 路径 | 说明 |

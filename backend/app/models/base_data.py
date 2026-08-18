@@ -77,7 +77,11 @@ class Project(Base, PrimaryKeyMixin, TimestampMixin):
 
 
 class Budget(Base, PrimaryKeyMixin, TimestampMixin):
-    """预算（部门×项目×科目×期间四维度唯一）。"""
+    """预算（部门×项目×科目×年度四维度唯一，含 12 个月分摊曲线）。
+
+    Stage 3 口径修正：原 `period=YYYY-MM` 与 12 项 `allocation_curve` 语义冲突，
+    统一为年度粒度 `budget_year=YYYY` + 月度分摊曲线（docs/requirements.md §6.2）。
+    """
 
     __tablename__ = "budget"
 
@@ -90,17 +94,17 @@ class Budget(Base, PrimaryKeyMixin, TimestampMixin):
     cost_category_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("cost_category.id"), nullable=False, index=True
     )
-    period: Mapped[str] = mapped_column(String(7), nullable=False)  # YYYY-MM
+    budget_year: Mapped[str] = mapped_column(String(4), nullable=False, index=True)  # YYYY
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
-    allocation_curve: Mapped[Any] = mapped_column(JSON, nullable=True)
+    allocation_curve: Mapped[Any] = mapped_column(JSON, nullable=True)  # 12 项，合计 1
 
     __table_args__ = (
         UniqueConstraint(
             "department_id",
             "project_id",
             "cost_category_id",
-            "period",
-            name="uq_budget_dim_period",
+            "budget_year",
+            name="uq_budget_dim_year",
         ),
     )
 

@@ -1,13 +1,16 @@
 """Celery 应用与 beat 调度配置。
 
 Redis 仅作 broker，任务状态与结论全落 DB（docs/DESIGN.md 原则 1.7）。
-Stage 1 仅建基础设施；预算/应收日调度任务在 Stage 2 填充 beat_schedule。
+beat 调度：预算监控每日 08:00（默认，调度节奏可由 sys_param
+`schedule.budget_monitor` 配置，V1 以默认 crontab 生效）；
+应收预警任务在应收阶段（Stage 4+）填充。
 """
 
 # celery 无 py.typed，第三方无类型边界豁免（dev-standards 允许适配层边界放宽）
 # pyright: reportMissingTypeStubs=false, reportUnknownMemberType=false
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import get_settings
 
@@ -26,8 +29,13 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    # Stage 1 占位；Stage 2 填充：
-    # "budget-monitor": {"task": "app.tasks.budget.run_monitor", "schedule": crontab(...)},
-    # "ar-warning": {"task": "app.tasks.ar.run_warning", "schedule": crontab(...)},
-    beat_schedule={},
+    beat_schedule={
+        "budget-monitor": {
+            "task": "app.tasks.budget.run_monitor",
+            "schedule": crontab(hour=8, minute=0),  # 每日 08:00（UTC 或本地由 timezone 决定）
+        },
+        # 应收预警任务（Stage 4+ 填充）：
+        # "ar-warning": {"task": "app.tasks.ar.run_warning",
+        #                "schedule": crontab(hour=8, minute=30)},
+    },
 )
