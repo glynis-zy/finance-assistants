@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>财务智能助手平台</title>
+  <link rel="stylesheet" href="/static/css/app.css" />
+</head>
+<body>
+  <!-- 登录视图 -->
+  <div id="login-view" class="login-wrap hidden">
+    <div class="login-card">
+      <h1>财务智能助手平台</h1>
+      <p class="login-sub">发票报销审核 · 预算执行监控 · 应收账款预警</p>
+      <div class="form-item">
+        <label>用户名</label>
+        <input id="login-username" type="text" autocomplete="username" placeholder="如 admin" />
+      </div>
+      <div class="form-item">
+        <label>密码</label>
+        <input id="login-password" type="password" autocomplete="current-password" placeholder="演示账号见 README" />
+      </div>
+      <div id="login-error" class="error-text"></div>
+      <button id="login-btn" class="btn btn-primary btn-block">登 录</button>
+    </div>
+  </div>
+
+  <!-- 主视图 -->
+  <div id="app-view" class="app-wrap hidden">
+    <aside class="sidebar">
+      <div class="brand">财务智能助手</div>
+      <nav id="menu"></nav>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <span id="page-title" class="page-title"></span>
+        <div class="user-box">
+          <span id="user-name"></span>
+          <span id="user-role" class="role-tag"></span>
+          <button id="logout-btn" class="btn btn-ghost btn-sm">退出</button>
+        </div>
+      </header>
+      <main id="content" class="content"></main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/auth.js"></script>
+  <script src="/static/js/reimbursement.js"></script>
+  <script src="/static/js/budget.js"></script>
+  <script src="/static/js/ar.js"></script>
+  <script src="/static/js/alerts.js"></script>
+  <script src="/static/js/admin.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
