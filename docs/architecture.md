@@ -121,7 +121,7 @@ audit_task                                             ar_risk_score
 | 预警投递 | 预警产生 | worker：站内必达 + webhook（配置启用） | 落 `notification` |
 
 ### 4.2 边界声明（写进 README，面试要主动说清）
-Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程内 asyncio 队列（仅单进程 Demo 边界），本平台升级为 Celery + Redis 的生产边界：支持多 worker、可重试、失败可查；`docker-compose` 起 worker + beat 双进程。Celery 任务本身仍建议幂等（如按任务参数生成唯一键）。
+Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程内 asyncio 队列（仅单进程 Demo 边界），本平台升级为 Celery + Redis 的**工程化异步边界**：支持多 worker、可重试、失败可查；`docker-compose` 起 worker + beat 双进程。注意：仅凭 Celery + Redis 不构成完整生产级，部署/监控/容灾不在 V1 范围。Celery 任务本身仍建议幂等（如按任务参数生成唯一键）。
 
 ### 4.3 调度节奏（参数化，sys_param 可调）
 - `schedule.budget_monitor` = `0 0 8 * * *`（每日 08:00，可配）；
@@ -135,13 +135,19 @@ Redis 仅作 broker；任务状态与结论**全落 DB**。相比 2.7 的进程�
 ### 5.1 报销域
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/reimbursements` | 新建报销单（含附件） |
-| GET | `/api/reimbursements/{id}` | 详情（含审核结论） |
-| POST | `/api/reimbursements/{id}/submit` | 提交 → 触发审核任务 |
-| POST | `/api/reimbursements/{id}/manual-review` | 财务人工复核落结论 |
-| POST | `/api/reimbursements/{id}/return` | 退回（申请人可重新提交） |
-| GET | `/api/audit-tasks/{id}` | 任务状态轮询 |
+| POST | `/api/reimbursements` | 新建报销单（草稿态） |
+| GET | `/api/reimbursements` | 列表（申请人行级过滤；`status` 筛选 + 分页） |
+| GET | `/api/reimbursements/{id}` | 详情（含明细、附件、最新审核结论） |
+| PUT | `/api/reimbursements/{id}` | 更新（仅 `draft`/`returned` 态；整体替换含明细） |
+| POST | `/api/reimbursements/{id}/attachments` | 上传附件（multipart 多文件 + `category`：invoice/travel/approval） |
+| DELETE | `/api/reimbursements/{id}/attachments/{attachment_id}` | 删除附件（仅 `draft`/`returned` 态） |
+| POST | `/api/reimbursements/{id}/submit` | 提交 → 触发审核任务，返回 `task_id`（重复提交 409） |
+| POST | `/api/reimbursements/{id}/manual-review` | 财务对 `manual_review` 态单据落结论（approved/returned，`reason` 必填） |
+| POST | `/api/reimbursements/{id}/return` | 财务主动退回（仅 `pending` 态，`reason` 必填） |
+| GET | `/api/audit-tasks/{task_id}` | 任务状态轮询（queued/parsing/done/failed） |
 | GET | `/api/reimbursements/{id}/report` | 报告（HTML 导出） |
+
+> 状态机：`draft → pending → approved / returned / manual_review`；`manual_review` 经财务裁决（manual-review）落 `approved`/`returned`；`returned` 可编辑后重新提交回 `pending`。结论由规则引擎判定，无法判定一律 `manual_review`（fail-closed）；`pending` 态仅财务可操作，`approved` 终态不可修改。
 
 ### 5.2 预算域
 | 方法 | 路径 | 说明 |

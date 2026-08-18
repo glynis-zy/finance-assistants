@@ -10,7 +10,7 @@
 
 > **OCR 负责"看懂文档"，LLM 负责"理解非结构化文本"与规则盲区兜底，规则引擎负责"确定性判定"，LLM 只做最后的"自然语言解释"。结论永远由规则引擎决定，存疑一律人工复核（fail-closed）。**
 
-**异步边界**：2.7 用进程内 asyncio 队列（仅单进程 Demo 边界）；本平台升级为 **Celery + Redis**（生产边界）。Redis 仅作 broker，任务状态与结论全落 DB，支持多 worker、可重试、失败可查。
+**异步边界**：2.7 用进程内 asyncio 队列（仅单进程 Demo 边界）；本平台升级为 **Celery + Redis**（工程化异步边界）。Redis 仅作 broker，任务状态与结论全落 DB，支持多 worker、可重试、失败可查（仅凭 Celery + Redis 不构成完整生产级，部署/监控/容灾不在 V1 范围）。
 
 ## 文档地图
 
@@ -18,6 +18,7 @@
 |---|---|
 | [docs/requirements.md](docs/requirements.md) | 需求规格：三助手输入/处理/输出/规则清单、角色权限、数据模型、验收标准 |
 | [docs/architecture.md](docs/architecture.md) | 架构：分层总览、数据归属、Celery 异步与调度、API、权限、部署、对 2.7 复用评估 |
+| [docs/api.md](docs/api.md) | API 契约：统一响应/分页/ID·金额·时间格式、认证、报销/预算/应收/预警/基础数据接口（路径·方法·权限·允许状态·请求响应·错误码·副作用） |
 | [docs/tech-stack.md](docs/tech-stack.md) | 技术选型：选型总表、取舍记录、外部服务降级约定 |
 | [docs/dev-standards.md](docs/dev-standards.md) | 开发规范：Ruff/pyright/pytest/pre-commit、Git 规范、目录结构 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 设计原则与模式：原则 11 条、模式落点、面试问答预演 |
@@ -28,8 +29,8 @@ Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · MySQL 8（可切 SQLite
 
 ## 当前状态
 
-**设计阶段**——本仓库当前仅含设计文档五件套。评审通过后进入实现（backend + frontend + docker-compose + seed 演示数据）。
+**需求已冻结**——`docs/requirements.md` v1.0 评审通过。后续进入实现（backend + frontend + docker-compose + seed 演示数据）；实现中发现非阻塞边界问题按最简单可运行方案处理，不再扩大评审范围。
 
 ## 相关项目
 
-- [finance-risk-review](https://github.com/)（桌面 `Desktop/finance-risk-review`）：2.7 节「财务单据智能风险审核系统」，本平台的模式与适配层来源。
+- `Desktop/finance-risk-review`：2.7 节「财务单据智能风险审核系统」，本平台的模式与适配层来源（详见 [architecture.md](docs/architecture.md) §8 复用评估）。

@@ -6,7 +6,7 @@
 
 ## 1. 语言与版本
 
-- Python **3.12+**；单 repo 单虚拟环境（`.venv`）。
+- Python **3.11+**（`pyproject.toml` 要求下限；本机已装 3.12.8，`.venv` 为 3.11）；单 repo 单虚拟环境（`.venv`）。
 - 依赖统一在根 `pyproject.toml` 声明（`[project]` + `[tool.*]`），生产/开发/任务依赖分组；可选 `uv` 加速。
 
 ## 2. 代码风格
