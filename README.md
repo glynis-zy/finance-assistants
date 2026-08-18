@@ -53,6 +53,50 @@ PYTHONPATH=. python -m uvicorn app.main:app --port 8000
 # 浏览器打开 http://127.0.0.1:8000
 ```
 
+### OCR / LLM 三模式（Stage 6B）
+
+| 模式 | 行为 | 适用 |
+|---|---|---|
+| `preset`（默认） | 不调用外部 API，使用内置预设解析结果，无需任何 Key | 演示 / 离线 |
+| `auto` | 先调真实厂商，失败自动回退 preset | 接真实验证但允许降级 |
+| `real` | 只调真实厂商，失败即失败（不 fallback） | 生产接入 |
+
+结论判定永远由规则引擎负责，OCR/LLM 只做识别与提取，**LLM 不能决定 approved/returned**。
+
+### 百度 OCR 配置（real 模式）
+
+1. 百度智能云控制台创建「文字识别」应用，获取 **API Key** 与 **Secret Key**
+2. 配置环境变量后启动：
+
+```bash
+cd backend
+cp .env.example .env
+# 编辑 .env：
+#   OCR_MODE=real
+#   OCR_API_KEY=你的API Key
+#   OCR_SECRET_KEY=你的Secret Key
+PYTHONPATH=. python -m uvicorn app.main:app --port 8000
+```
+
+- invoice 附件走**增值税发票识别**接口（结构化字段）；travel/approval 走**通用文字识别**（全文交 LLM 提取）
+- access_token 自动获取并进程内缓存（官方默认 30 天，过期前 5 分钟刷新），日志不输出任何凭证
+
+### DeepSeek 配置（real 模式）
+
+1. DeepSeek 开放平台申请 API Key（OpenAI 兼容接口）
+2. 配置环境变量：
+
+```bash
+#   LLM_MODE=real
+#   LLM_API_KEY=你的API Key
+#   LLM_BASE_URL=https://api.deepseek.com   （官方默认，可省略）
+#   LLM_MODEL=deepseek-v4-flash              （以官方文档为准）
+```
+
+- 字段提取与科目推荐使用严格 JSON 输出（`response_format=json_object`），结果仍过 Pydantic 校验
+- LLM 推荐科目超出白名单（TRAVEL/OFFICE/ENTERTAIN/MEETING）或低置信度 → 不采纳（manual_review），不会产生不存在的科目
+```
+
 不配置百度 OCR / DeepSeek / Webhook 任何 Key，靠 preset/auto 模式即可完整演示三助手（real 厂商接入见 Stage 6B）。
 
 ## 演示账号（seed 内置）

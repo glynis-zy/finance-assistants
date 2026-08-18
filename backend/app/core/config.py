@@ -49,7 +49,12 @@ class Settings(BaseSettings):
     ocr_api_key: str = ""
     ocr_secret_key: str = ""
     llm_api_key: str = ""
-    llm_base_url: str = ""
+    llm_base_url: str = "https://api.deepseek.com"
+    # DeepSeek 模型名（官方 OpenAI 兼容；以官方文档为准）
+    llm_model: str = "deepseek-v4-flash"
+    # 外部 HTTP 超时（秒）
+    ocr_timeout_seconds: int = 15
+    llm_timeout_seconds: int = 30
 
     @property
     def celery_broker(self) -> str:

@@ -9,7 +9,7 @@
 | 层 | 选型 | 版本 | 与 2.7 关系 | 理由 |
 |---|---|---|---|---|
 | 语言 | Python | 3.11+（本机 3.12.8 / venv 3.11） | 沿用 | 生态成熟 |
-| Web 框架 | FastAPI | 2.x | 沿用 | 异步友好、Pydantic 原生、OpenAPI 自动生成 |
+| Web 框架 | FastAPI | 0.110+（pyproject `fastapi>=0.110`） | 沿用 | 异步友好、Pydantic 原生、OpenAPI 自动生成 |
 | ORM | SQLAlchemy | 2.x | 沿用 | 成熟声明式 ORM，事务一致性好 |
 | 校验/DTO | Pydantic | v2 | 沿用 | LLM 输出与 HTTP 边界强校验（禁止自由文本） |
 | 数据库 | MySQL 8（Docker） | 8.x | 沿用 | 演示可切 SQLite（`DATABASE_URL`），验证用 MySQL |
