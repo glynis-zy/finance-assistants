@@ -1,0 +1,60 @@
+services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: finance
+      MYSQL_USER: finance
+      MYSQL_PASSWORD: finance
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: change-me-in-prod-0123456789abcdef
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  celery-worker:
+    build: ./backend
+    environment:
+      DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+      - mysql
+    command: celery -A app.tasks.celery_app:celery_app worker --loglevel=info
+
+  celery-beat:
+    build: ./backend
+    environment:
+      DATABASE_URL: mysql+pymysql://finance:finance@mysql:3306/finance
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+      - mysql
+    command: celery -A app.tasks.celery_app:celery_app beat --loglevel=info
+
+volumes:
+  mysql_data:

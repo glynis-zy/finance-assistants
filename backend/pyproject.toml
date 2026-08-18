@@ -1,0 +1,48 @@
+[project]
+name = "finance-assistants-backend"
+version = "0.1.0"
+description = "财务智能助手平台后端（Stage 1：骨架 + 数据模型 + 平台基础设施）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "sqlalchemy>=2.0",
+    "pydantic>=2.5",
+    "pydantic-settings>=2.0",
+    "alembic>=1.13",
+    "pymysql>=1.1",
+    "cryptography>=42.0",
+    "celery[redis]>=5.3",
+    "redis>=5.0",
+    "pyjwt>=2.8",
+    "bcrypt>=4.0",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "ruff>=0.4",
+    "pyright>=1.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["app", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["app", "tests", "scripts"]
+venvPath = ".."
+venv = ".venv"
+reportMissingImports = true
