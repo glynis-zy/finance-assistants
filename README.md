@@ -31,6 +31,35 @@ Python 3.12 · FastAPI · SQLAlchemy 2 · Pydantic v2 · MySQL 8（可切 SQLite
 
 **需求已冻结**——`docs/requirements.md` v1.0 评审通过。后续进入实现（backend + frontend + docker-compose + seed 演示数据）；实现中发现非阻塞边界问题按最简单可运行方案处理，不再扩大评审范围。
 
+## 快速启动（preset 模式，无需任何外部 Key）
+
+```bash
+cd backend
+python -m alembic upgrade head      # 建库（SQLite dev.db，可切 MySQL）
+PYTHONPATH=. python scripts/seed.py  # 灌演示数据并触发预算监控 + 应收评分
+uvicorn app.main:app --port 8000    # 启动（含前端静态托管）
+# 浏览器打开 http://127.0.0.1:8000
+```
+
+不配置百度 OCR / DeepSeek / Webhook 任何 Key，靠 preset/auto 模式即可完整演示三助手。
+
+## 演示账号（seed 内置）
+
+| 用户名 | 密码 | 角色 | 可演示内容 |
+|---|---|---|---|
+| `admin` | `admin123` | 系统管理员 | 预警中心（全量）、系统管理（用户/角色/参数/科目） |
+| `zhang.san` | `123456` | 报销申请人 | 报销列表/新建/编辑/附件/提交/轮询结果/审核报告 |
+| `finance.li` | `123456` | 财务审核 | 报销审核（退回/人工裁决）、台账查询、预算监控、预警中心 |
+| `budget.wang` | `123456` | 预算管理员 | 预算管理（新建/调整留痕）、偏差明细/汇总、预警中心（budget） |
+| `ar.zhao` | `123456` | 应收专员 | 应收列表/新增/回款/催收、风险排名/客户详情、预警中心（ar） |
+
+## seed 演示场景
+
+- **报销**：`BX-2026-0001` approved（已写台账）· `0002` returned（发票抬头不符）· `0003` manual_review（财务裁决）
+- **预算**：销售差旅 120 万正常（60 万=计划 60 万不误报）· 销售招待 20 万超支 high（→ budget 预警）· 销售办公 30 万增长异常 · 研发差旅进度落后 · 研发办公 low
+- **应收**：A 客户 86 分 high（催收后未回款）· B 客户 medium（催收后已回款，collection=0，含 partial 应收）· C 客户 0 分 low（无未结）
+- **预警**：budget alert（超支 high）+ ar alert（score ≥ 70），预警中心两类可见
+
 ## 相关项目
 
 - `Desktop/finance-risk-review`：2.7 节「财务单据智能风险审核系统」，本平台的模式与适配层来源（详见 [architecture.md](docs/architecture.md) §8 复用评估）。

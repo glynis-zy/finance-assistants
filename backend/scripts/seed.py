@@ -25,6 +25,12 @@ from app.models.base_data import (
     SysParam,
 )
 from app.models.rbac import SysPermission, SysRole, SysUser
+from app.models.reimbursement import (
+    AuditConclusion,
+    AuditTask,
+    Reimbursement,
+    ReimbursementItem,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -369,6 +375,196 @@ def seed(db: Session) -> None:
                 )
             )
 
+    # 预算五档补充（覆盖 low/medium/high/进度异常/增长异常/超支 high→预警）：
+    # 1) 销售 ENTERTAIN 20 万：1-6 月每月 4 万 → 累计 24 万 vs 计划 12 万 → 超支 high（→alert）
+    # 2) 销售 OFFICE 30 万：5 月 1 万、6 月 3 万 → 环比 200% 增长异常 + 进度落后
+    # 3) 研发 OFFICE 10 万：1-6 月每月 1.05 万 → 累计 6.3 万 vs 计划 6 万 → 超支 low
+    extra_budgets: list[dict[str, object]] = [
+        {"dept": "SALES", "proj": "PJ-HD", "cat": "ENTERTAIN", "amount": "200000.00"},
+        {"dept": "SALES", "proj": "PJ-HD", "cat": "OFFICE", "amount": "300000.00"},
+        {"dept": "RND", "proj": "PJ-XC", "cat": "OFFICE", "amount": "100000.00"},
+    ]
+    for eb in extra_budgets:
+        exists = db.scalar(
+            select(Budget.id).where(
+                Budget.department_id == dept_by_code[str(eb["dept"])].id,
+                Budget.project_id == proj_by_code[str(eb["proj"])].id,
+                Budget.cost_category_id == cat_by_code[str(eb["cat"])].id,
+                Budget.budget_year == "2026",
+            )
+        )
+        if exists is None:
+            db.add(
+                Budget(
+                    department_id=dept_by_code[str(eb["dept"])].id,
+                    project_id=proj_by_code[str(eb["proj"])].id,
+                    cost_category_id=cat_by_code[str(eb["cat"])].id,
+                    budget_year="2026",
+                    amount=eb["amount"],  # type: ignore[arg-type]
+                    allocation_curve=curve,
+                )
+            )
+    # 对应台账
+    extra_ledger: list[dict[str, object]] = [
+        *[
+            {
+                "dept": "SALES",
+                "proj": "PJ-HD",
+                "cat": "ENTERTAIN",
+                "period": f"2026-{m:02d}",
+                "amount": "40000.00",
+                "ref": f"SEED-ENT-{m:02d}",
+            }
+            for m in range(1, 7)
+        ],
+        {
+            "dept": "SALES",
+            "proj": "PJ-HD",
+            "cat": "OFFICE",
+            "period": "2026-05",
+            "amount": "10000.00",
+            "ref": "SEED-OFF-05",
+        },
+        {
+            "dept": "SALES",
+            "proj": "PJ-HD",
+            "cat": "OFFICE",
+            "period": "2026-06",
+            "amount": "30000.00",
+            "ref": "SEED-OFF-06",
+        },
+        *[
+            {
+                "dept": "RND",
+                "proj": "PJ-XC",
+                "cat": "OFFICE",
+                "period": f"2026-{m:02d}",
+                "amount": "10500.00",
+                "ref": f"SEED-RND-OFF-{m:02d}",
+            }
+            for m in range(1, 7)
+        ],
+    ]
+    for el in extra_ledger:
+        exists = db.scalar(select(ExpenseLedger.id).where(ExpenseLedger.ref_no == str(el["ref"])))
+        if exists is None:
+            month = int(str(el["period"])[5:7])
+            db.add(
+                ExpenseLedger(
+                    source="import",
+                    cost_category_id=cat_by_code[str(el["cat"])].id,
+                    department_id=dept_by_code[str(el["dept"])].id,
+                    project_id=proj_by_code[str(el["proj"])].id,
+                    period=str(el["period"]),
+                    amount=el["amount"],  # type: ignore[arg-type]
+                    occurred_at=datetime(2026, month, 20, tzinfo=UTC),
+                    ref_no=str(el["ref"]),
+                )
+            )
+
+    # 演示报销单（三态：approved / returned / manual_review）
+    demo_reimbs: list[dict[str, object]] = [
+        {
+            "no": "BX-2026-0001",
+            "user": "zhang.san",
+            "dept": "SALES",
+            "proj": "PJ-HD",
+            "cat": "TRAVEL",
+            "amount": "1200.00",
+            "status": "approved",
+            "invoice": "INV-DEMO-0001",
+            "desc": "差旅费-高铁票",
+            "conclusion": "approved",
+        },
+        {
+            "no": "BX-2026-0002",
+            "user": "zhang.san",
+            "dept": "SALES",
+            "proj": "PJ-HD",
+            "cat": "ENTERTAIN",
+            "amount": "2600.00",
+            "status": "returned",
+            "invoice": "INV-DEMO-0002",
+            "desc": "业务招待费",
+            "conclusion": "returned",
+            "return_reason": "发票抬头与本公司不符",
+        },
+        {
+            "no": "BX-2026-0003",
+            "user": "zhang.san",
+            "dept": "SALES",
+            "proj": "PJ-HD",
+            "cat": "TRAVEL",
+            "amount": "3000.00",
+            "status": "manual_review",
+            "invoice": "INV-DEMO-0003",
+            "desc": "差旅费-机票",
+            "conclusion": "manual_review",
+        },
+    ]
+    user_objs = {u.username: u for u in db.scalars(select(SysUser)).all()}
+    for rb in demo_reimbs:
+        exists = db.scalar(select(Reimbursement.id).where(Reimbursement.no == str(rb["no"])))
+        if exists is not None:
+            continue
+        applicant = user_objs[str(rb["user"])]
+        reimb = Reimbursement(
+            no=str(rb["no"]),
+            applicant_id=applicant.id,
+            department_id=dept_by_code[str(rb["dept"])].id,
+            project_id=proj_by_code[str(rb["proj"])].id,
+            total_amount=rb["amount"],  # type: ignore[arg-type]
+            currency="CNY",
+            status=str(rb["status"]),
+            return_reason=rb.get("return_reason"),
+            submitted_at=datetime(2026, 6, 10, tzinfo=UTC),
+        )
+        db.add(reimb)
+        db.flush()
+        db.add(
+            ReimbursementItem(
+                reimbursement_id=reimb.id,
+                cost_category_id=cat_by_code[str(rb["cat"])].id,
+                amount=rb["amount"],  # type: ignore[arg-type]
+                invoice_key=str(rb["invoice"]),
+                description=str(rb["desc"]),
+            )
+        )
+        task = AuditTask(reimbursement_id=reimb.id, status="done")
+        db.add(task)
+        db.flush()
+        db.add(
+            AuditConclusion(
+                reimbursement_id=reimb.id,
+                task_id=task.id,
+                result=str(rb["conclusion"]),
+                check_items=[
+                    {"code": "invoice_match", "status": "passed", "message": "发票信息一致"},
+                    {"code": "budget_within", "status": "passed", "message": "预算内"},
+                ],
+                risk_items=[]
+                if str(rb["conclusion"]) == "approved"
+                else [
+                    {"code": "invoice_match", "level": "high", "message": "发票抬头与本公司不符"}
+                ],
+                reason=str(rb["conclusion"]),
+            )
+        )
+        # approved → 写入台账（三助手链路 A：approved → expense_ledger）
+        if str(rb["conclusion"]) == "approved":
+            db.add(
+                ExpenseLedger(
+                    source="reimb",
+                    cost_category_id=cat_by_code[str(rb["cat"])].id,
+                    department_id=dept_by_code[str(rb["dept"])].id,
+                    project_id=proj_by_code[str(rb["proj"])].id,
+                    period="2026-06",
+                    amount=rb["amount"],  # type: ignore[arg-type]
+                    occurred_at=datetime(2026, 6, 10, tzinfo=UTC),
+                    ref_no=str(rb["no"]),
+                )
+            )
+
     # 演示应收数据（客户/合同/应收/付款/催收，覆盖高中低三档风险）
     demo_customers: list[dict[str, str]] = [
         {"code": "CUS-A", "name": "某某科技有限公司"},
@@ -405,13 +601,14 @@ def seed(db: Session) -> None:
         contract_objs[str(ct["no"])] = obj
 
     # 应收：A 高风险（逾期 200+ 未结 + 历史逾期结清 + 催收后未回款）
-    #       B 中风险（逾期 ~48 天未结 + 历史逾期结清）
+    #       B 中风险（逾期 ~48 天未结 + 历史逾期结清 + 催收后已回款 → collection=0）
     #       C 低风险（全部结清，无未结）
     demo_receivables: list[dict[str, object]] = [
         {"inv": "FP-A-001", "contract": "HT-A-001", "amount": "100000.00", "due": "2025-12-01"},
         {"inv": "FP-A-002", "contract": "HT-A-001", "amount": "200000.00", "due": "2026-01-01"},
         {"inv": "FP-B-001", "contract": "HT-B-001", "amount": "150000.00", "due": "2026-07-01"},
         {"inv": "FP-B-002", "contract": "HT-B-001", "amount": "80000.00", "due": "2026-06-01"},
+        {"inv": "FP-B-003", "contract": "HT-B-001", "amount": "100000.00", "due": "2026-08-01"},
         {"inv": "FP-C-001", "contract": "HT-C-001", "amount": "50000.00", "due": "2026-05-01"},
     ]
     rec_objs: dict[str, ArReceivable] = {}
@@ -432,7 +629,13 @@ def seed(db: Session) -> None:
 
     demo_payments: list[dict[str, object]] = [
         {"inv": "FP-A-001", "amount": "100000.00", "at": "2026-01-30T00:00:00Z"},
+        {"inv": "FP-B-001", "amount": "50000.00", "at": "2026-08-15T00:00:00Z"},  # 催收后回款
         {"inv": "FP-B-002", "amount": "80000.00", "at": "2026-07-01T00:00:00Z"},
+        {
+            "inv": "FP-B-003",
+            "amount": "40000.00",
+            "at": "2026-08-05T00:00:00Z",
+        },  # 部分回款 → partial
         {"inv": "FP-C-001", "amount": "50000.00", "at": "2026-05-10T00:00:00Z"},
     ]
     for p in demo_payments:
@@ -451,9 +654,11 @@ def seed(db: Session) -> None:
                     received_at=datetime.fromisoformat(str(p["at"]).replace("Z", "+00:00")),
                 )
             )
-            # 结清后状态置 settled（演示数据直接定态）
-            if rec.invoice_no in ("FP-A-001", "FP-B-002", "FP-C-001"):
+            # 按累计到账维护状态（与 ar_service._refresh_status 口径一致）
+            if str(p["inv"]) in ("FP-A-001", "FP-B-002", "FP-C-001"):
                 rec.status = "settled"
+            elif str(p["inv"]) == "FP-B-003":
+                rec.status = "partial"  # 100000 中回款 40000
 
     demo_collections: list[dict[str, object]] = [
         {
@@ -461,6 +666,12 @@ def seed(db: Session) -> None:
             "channel": "电话",
             "result": "承诺回款",
             "at": "2026-08-01T00:00:00Z",
+        },
+        {
+            "customer": "CUS-B",
+            "channel": "电话",
+            "result": "承诺回款",
+            "at": "2026-08-10T00:00:00Z",
         },
     ]
     for c in demo_collections:
@@ -490,6 +701,14 @@ def main() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed(db)
+        # 触发一次预算监控（固定核算期 2026-06，演示预算/台账均构造于该期；幂等）
+        try:
+            from app.services import monitor_service
+
+            summary = monitor_service.run_monitor(db, "2026-06")
+            print(f"预算监控完成：{summary}")
+        except Exception as exc:  # noqa: BLE001 - seed 演示链路不阻断
+            print(f"预算监控跳过：{exc}")
         # 触发一次应收全量评分（幂等；仅演示链路可用，异常不阻断 seed）
         try:
             from app.services import ar_service

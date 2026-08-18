@@ -1,15 +1,29 @@
-"""FastAPI 应用入口。"""
+"""FastAPI 应用入口（含前端静态资源托管）。"""
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
-from app.routers import ar, auth, budgets, deviations, health, reimbursements, sys_params
+from app.routers import (
+    admin,
+    alerts,
+    ar,
+    auth,
+    base_data,
+    budgets,
+    deviations,
+    health,
+    ledger,
+    reimbursements,
+    sys_params,
+)
 
 settings = get_settings()
 
@@ -18,6 +32,8 @@ app = FastAPI(
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
 )
+
+FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 
 
 @app.exception_handler(AppError)
@@ -72,3 +88,22 @@ app.include_router(reimbursements.audit_router, prefix=settings.api_prefix)
 app.include_router(budgets.router, prefix=settings.api_prefix)
 app.include_router(deviations.router, prefix=settings.api_prefix)
 app.include_router(ar.router, prefix=settings.api_prefix)
+app.include_router(alerts.router, prefix=settings.api_prefix)
+app.include_router(base_data.router, prefix=settings.api_prefix)
+app.include_router(ledger.router, prefix=settings.api_prefix)
+app.include_router(admin.router, prefix=settings.api_prefix)
+
+
+# 前端静态资源（原生单页，无构建链）
+if FRONTEND_DIR.is_dir():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(FRONTEND_DIR)),
+        name="frontend",
+    )
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    """单页入口（未匹配前端路由时兜底）。"""
+    return FileResponse(str(FRONTEND_DIR / "index.html"))
